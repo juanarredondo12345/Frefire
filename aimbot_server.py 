@@ -1,0 +1,94 @@
+# aimbot_server.py
+import subprocess
+import time
+import threading
+import socket
+import json
+import cv2
+import numpy as np
+
+# Configuración
+HOST = '0.0.0.0'
+PORT = 8080
+ADB_DEVICE_IP = "192.168.1.100"  # CAMBIA ESTO POR LA IP DE TU TELÉFONO
+
+class AimbotServer:
+    def __init__(self):
+        self.is_active = False
+        self.sensitivity = 1.5
+        self.target_color = (0, 255, 0) # Color verde para detección básica
+        
+    def start_aim_loop(self):
+        """Bucle principal que detecta y mueve la cámara."""
+        while True:
+            if self.is_active:
+                try:
+                    # 1. Capturar pantalla desde el teléfono
+                    result = subprocess.run(
+                        ['adb', '-s', f'{ADB_DEVICE_IP}:5555', 'exec-out', 'screencap', '-p'],
+                        capture_output=True
+                    )
+                    
+                    # Convertir imagen a OpenCV
+                    img_array = np.frombuffer(result.stdout, dtype=np.uint8)
+                    frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                    
+                    if frame is not None:
+                        # Aquí iría tu lógica de detección (ej. Haar Cascades o YOLO)
+                        # Por ahora, simulamos buscando el centro
+                        h, w, _ = frame.shape
+                        center_x, center_y = w // 2, h // 2
+                        
+                        # Simular movimiento suave hacia el objetivo
+                        self.move_camera(center_x, center_y)
+                        
+                except Exception as e:
+                    print(f"Error en loop: {e}")
+            
+            time.sleep(0.05) # ~20 FPS
+
+    def move_camera(self, target_x, target_y):
+        """Envía comando swipe a ADB para mover la mira."""
+        # Ejemplo: Deslizar desde el centro hacia el objetivo
+        cmd = f"adb -s {ADB_DEVICE_IP}:5555 shell input swipe 500 500 {target_x} {target_y} 100"
+        subprocess.run(cmd, shell=True)
+
+    def handle_client(self, conn, addr):
+        with conn:
+            while True:
+                data = conn.recv(1024).decode('utf-8').strip()
+                if not data:
+                    break
+                
+                if data == "AIM_ON":
+                    self.is_active = True
+                    print("✅ Aimbot ACTIVADO")
+                elif data == "AIM_OFF":
+                    self.is_active = False
+                    print("❌ Aimbot DESACTIVADO")
+                elif data.startswith("SET_SENS"):
+                    try:
+                        self.sensitivity = float(data.split(":")[1])
+                        print(f"🎯 Sensibilidad ajustada a {self.sensitivity}")
+                    except:
+                        pass
+
+def main():
+    server = AimbotServer()
+    
+    # Iniciar hilo del bucle de detección
+    threading.Thread(target=server.start_aim_loop, daemon=True).start()
+    
+    # Iniciar servidor de sockets
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((HOST, PORT))
+    sock.listen()
+    print(f"🚀 Servidor escuchando en {HOST}:{PORT}")
+    
+    while True:
+        conn, addr = sock.accept()
+        threading.Thread(target=server.handle_client, args=(conn, addr)).start()
+
+if __name__ == "__main__":
+    main()
